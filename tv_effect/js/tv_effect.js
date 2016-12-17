@@ -4,6 +4,11 @@ window.onload = function(){
 
 function fileread(ev){
 	const file = ev.target.files[0];
+
+	if(!file){
+		return;
+	}
+
 	const fr = new FileReader();
 	fr.onload = fileload;
 	fr.readAsDataURL(file);
