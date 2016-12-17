@@ -9,15 +9,13 @@ window.onload = function(){
 		}
 
 		const fr = new FileReader();
-		fr.onload = fileload;
+		fr.onload = (ev) => {
+			const img = new Image();
+			img.src = ev.target.result;
+			
+			img.addEventListener('load', tv_effect);
+		};
 		fr.readAsDataURL(file);
-	}
-
-	function fileload(ev){
-		const img = new Image();
-		img.src = ev.target.result;
-		
-		img.addEventListener('load', tv_effect);
 	}
 
 	function tv_effect(ev){
@@ -33,37 +31,55 @@ window.onload = function(){
 		const src = ctx.getImageData(0, 0, base_img.width, base_img.height).data;
 		const img_data = ctx.createImageData(canvas.width, canvas.height);
 		const res = img_data.data; 
-		const res_width = canvas.width;
 
-		for(let y = 0; y < base_img.height; y++){
-			for(let x = 0; x < base_img.width; x++){
-				const idx = (x + y * base_img.width) * 4;
-				const r = src[idx];
-				const g = src[idx + 1];
-				const b = src[idx + 2];
+		const jobs = [];
 
-				const line = (x + y * canvas.width) * 4 * 3;
-				const line2 = line + res_width * 4;
-				const line3 = line + res_width * 8;
-				res[line] = res[line2] = res[line3] = r;
-				res[line + 5] = res[line2 + 5] = res[line3 + 5] = g;
-				res[line + 10] = res[line2 + 10] = res[line3 + 10] = b;
+		let slice_src_idx = 0;
 
-				res[line + 3] = res[line + 7] = res[line + 11] = 255;
-				res[line2 + 3] = res[line2 + 7] = res[line2 + 11] = 255;
-				res[line3 + 3] = res[line3 + 7] = res[line3 + 11] = 255;
-			}
+		for(let i = 0; i < 4; i++){
+			const worker = new Worker('js/worker.js');
+			const height  = (i === 3)? Math.floor(base_img.height / 4) + base_img.height % 4 : Math.floor(base_img.height / 4);
+			const chunk_size = height * base_img.width * 4;
+			const slice_src = src.slice(slice_src_idx, slice_src_idx + chunk_size);
+			
+			slice_src_idx += chunk_size;
+
+			const promise = new Promise(function(resolve, reject){
+				worker.onmessage = (message) => {
+					resolve(message.data);
+				};
+			})
+
+			jobs.push(promise);
+			
+			worker.postMessage(
+				{
+					width: base_img.width,
+					height: height,
+					img: slice_src.buffer
+				},
+				[slice_src.buffer]
+			)
 		}
 
-		ctx.putImageData(img_data, 0, 0);
+		Promise.all(jobs).then(function(results){
+			let idx = 0;
+			for(let j = 0; j < results.length; j++){
+				const typed_array = new Uint8ClampedArray(results[j]);
+				res.set(typed_array, idx);
+				idx += typed_array.length;
+			}
 
-		const data_url = canvas.toDataURL();
-		const preview = document.createElement('img');
-		preview.src = data_url;
-		preview.setAttribute('style', 'max-width:100%;');
+			ctx.putImageData(img_data, 0, 0);
 
-		const target = document.getElementById('result');
-		target.textContent = '';
-		target.appendChild(preview);
+			const preview = document.createElement('img');
+			preview.src = canvas.toDataURL();
+			preview.setAttribute('style', 'max-width:100%;');
+
+			const target = document.getElementById('result');
+			target.textContent = '';
+			target.appendChild(preview);
+		});
+
 	}
 }
